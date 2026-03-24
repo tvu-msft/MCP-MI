@@ -13,6 +13,8 @@ namespace MCP_MI.Samples;
 
 public static class IcmMcpClientSample
 {
+    private const string IncidentIdParameterName = "incidentId";
+
     public static async Task RunInteractiveAsync()
     {
         var builder = Host.CreateApplicationBuilder();
@@ -101,18 +103,50 @@ public static class IcmMcpClientSample
         while (true)
         {
             Console.WriteLine("======================================================");
-            Console.Write("Select a tool by number (or q to quit): ");
-            string? selectedRaw = Console.ReadLine();
+            Console.WriteLine("Choose execution mode:");
+            Console.WriteLine("1. Run a specific function");
+            Console.WriteLine("2. Run in batch (incidentId only)");
+            Console.Write("Select 1, 2, or q to quit: ");
+            string? modeRaw = Console.ReadLine();
 
-            if (string.Equals(selectedRaw?.Trim(), "q", StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(modeRaw?.Trim(), "q", StringComparison.OrdinalIgnoreCase))
             {
                 Console.WriteLine("Exiting tool runner.");
                 return;
             }
 
+            if (string.Equals(modeRaw?.Trim(), "1", StringComparison.OrdinalIgnoreCase))
+            {
+                await RunSpecificFlowAsync(httpClient, tools);
+                continue;
+            }
+
+            if (string.Equals(modeRaw?.Trim(), "2", StringComparison.OrdinalIgnoreCase))
+            {
+                await RunBatchIncidentIdOnlyAsync(httpClient, tools);
+                continue;
+            }
+
+            Console.WriteLine("Invalid option. Please enter 1, 2, or q.");
+        }
+    }
+
+    private static async Task RunSpecificFlowAsync(HttpClient httpClient, IList<ToolDoc> tools)
+    {
+        while (true)
+        {
+            Console.WriteLine("------------------------------------------------------");
+            Console.Write("Select a tool by number (or b to go back): ");
+            string? selectedRaw = Console.ReadLine();
+
+            if (string.Equals(selectedRaw?.Trim(), "b", StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
             if (!int.TryParse(selectedRaw, out int selectedIndex))
             {
-                Console.WriteLine("Invalid selection. Please enter a number or q.");
+                Console.WriteLine("Invalid selection. Please enter a number or b.");
                 continue;
             }
 
@@ -148,6 +182,185 @@ public static class IcmMcpClientSample
                 Console.WriteLine($"Tool call failed: {ex.Message}");
             }
         }
+    }
+
+    private static async Task RunBatchIncidentIdOnlyAsync(HttpClient httpClient, IList<ToolDoc> tools)
+    {
+        Console.Write("Enter incidentId: ");
+        string? incidentIdInput = Console.ReadLine();
+        if (string.IsNullOrWhiteSpace(incidentIdInput))
+        {
+            Console.WriteLine("incidentId is required for batch mode.");
+            return;
+        }
+
+        List<BatchRunResult> results = new List<BatchRunResult>();
+
+        foreach (ToolDoc tool in tools)
+        {
+            if (!TryBuildIncidentIdOnlyArguments(tool, incidentIdInput.Trim(), out Dictionary<string, object?> arguments))
+            {
+                continue;
+            }
+
+            var stopwatch = Stopwatch.StartNew();
+            bool success;
+            string message = string.Empty;
+            using var spinnerCts = new CancellationTokenSource();
+            Task spinnerTask = ShowSpinnerAsync($"Running {tool.Name}", spinnerCts.Token);
+            try
+            {
+                await SendMcpRequestAsync(
+                    httpClient,
+                    method: "tools/call",
+                    @params: new
+                    {
+                        name = tool.Name,
+                        arguments
+                    });
+                success = true;
+            }
+            catch (Exception ex)
+            {
+                success = false;
+                message = BuildShortErrorMessage(ex.Message);
+            }
+            finally
+            {
+                spinnerCts.Cancel();
+                try
+                {
+                    await spinnerTask;
+                }
+                catch (OperationCanceledException)
+                {
+                }
+
+                stopwatch.Stop();
+            }
+
+            results.Add(new BatchRunResult(tool.Name, stopwatch.ElapsedMilliseconds, success, message));
+        }
+
+        if (results.Count == 0)
+        {
+            Console.WriteLine("No tools found that can run with incidentId as the only required parameter.");
+            return;
+        }
+
+        PrintBatchResultsTable(results);
+    }
+
+    private static bool TryBuildIncidentIdOnlyArguments(ToolDoc tool, string incidentIdInput, out Dictionary<string, object?> arguments)
+    {
+        arguments = new Dictionary<string, object?>();
+
+        if (tool.InputSchema.ValueKind != JsonValueKind.Object ||
+            !tool.InputSchema.TryGetProperty("properties", out JsonElement properties) ||
+            properties.ValueKind != JsonValueKind.Object)
+        {
+            return false;
+        }
+
+        if (!properties.TryGetProperty(IncidentIdParameterName, out JsonElement incidentIdProperty))
+        {
+            return false;
+        }
+
+        var requiredSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (tool.InputSchema.TryGetProperty("required", out JsonElement required) && required.ValueKind == JsonValueKind.Array)
+        {
+            foreach (JsonElement req in required.EnumerateArray())
+            {
+                string? reqName = req.GetString();
+                if (!string.IsNullOrWhiteSpace(reqName))
+                {
+                    requiredSet.Add(reqName);
+                }
+            }
+        }
+
+        // Batch mode only supports tools where incidentId is the only required argument.
+        if (requiredSet.Count != 1 || !requiredSet.Contains(IncidentIdParameterName))
+        {
+            return false;
+        }
+
+        string paramType = incidentIdProperty.TryGetProperty("type", out JsonElement typeEl)
+            ? typeEl.GetString() ?? "string"
+            : "string";
+
+        try
+        {
+            arguments[IncidentIdParameterName] = ParseInputValue(incidentIdInput, paramType);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static void PrintBatchResultsTable(IList<BatchRunResult> results)
+    {
+        const int funcWidth = 40;
+        const int latencyWidth = 12;
+        const int statusWidth = 14;
+        const int messageWidth = 50;
+
+        string horizontal = $"+{new string('-', funcWidth + 2)}+{new string('-', latencyWidth + 2)}+{new string('-', statusWidth + 2)}+{new string('-', messageWidth + 2)}+";
+        Console.WriteLine("Batch execution results:");
+        Console.WriteLine(horizontal);
+        Console.WriteLine($"| {PadRight("func name", funcWidth)} | {PadRight("latency", latencyWidth)} | {PadRight("success/failed", statusWidth)} | {PadRight("message", messageWidth)} |");
+        Console.WriteLine(horizontal);
+
+        foreach (BatchRunResult result in results)
+        {
+            string latency = $"{result.LatencyMs} ms";
+            string status = result.Success ? "success" : "failed";
+            string message = result.Success ? string.Empty : result.Message;
+            Console.WriteLine($"| {PadRight(result.FunctionName, funcWidth)} | {PadRight(latency, latencyWidth)} | {PadRight(status, statusWidth)} | {PadRight(message, messageWidth)} |");
+        }
+
+        Console.WriteLine(horizontal);
+    }
+
+    private static string BuildShortErrorMessage(string message)
+    {
+        if (string.IsNullOrWhiteSpace(message))
+        {
+            return "Unknown error";
+        }
+
+        return message.Replace("\r", " ").Replace("\n", " ").Trim();
+    }
+
+    private static async Task ShowSpinnerAsync(string label, CancellationToken cancellationToken)
+    {
+        char[] frames = new[] { '|', '/', '-', '\\' };
+        int index = 0;
+
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            Console.Write($"\r{label} {frames[index % frames.Length]}");
+            index++;
+            try
+            {
+                await Task.Delay(120, cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+        }
+
+        int clearWidth = label.Length + 4;
+        Console.Write("\r" + new string(' ', clearWidth) + "\r");
+    }
+
+    private static string PadRight(string value, int width)
+    {
+        return value.Length > width ? value.Substring(0, width) : value.PadRight(width);
     }
 
     private static async Task<JsonElement> SendMcpRequestAsync(HttpClient client, string method, object @params)
@@ -451,4 +664,6 @@ public static class IcmMcpClientSample
         string Parameters,
         string ExampleArguments,
         JsonElement InputSchema);
+
+    private sealed record BatchRunResult(string FunctionName, long LatencyMs, bool Success, string Message);
 }
