@@ -162,8 +162,7 @@ public static class IcmMcpClientSample
             try
             {
                 Console.WriteLine($"Calling tool: {selectedTool.Name}");
-                var stopwatch = Stopwatch.StartNew();
-                JsonElement callResult = await SendMcpRequestAsync(
+                McpCallResult call = await SendMcpRequestTimedAsync(
                     httpClient,
                     method: "tools/call",
                     @params: new
@@ -171,11 +170,15 @@ public static class IcmMcpClientSample
                         name = selectedTool.Name,
                         arguments
                     });
-                stopwatch.Stop();
 
                 Console.WriteLine("Result:");
-                Console.WriteLine(ExtractFirstTextContent(callResult));
-                Console.WriteLine($"Latency: {stopwatch.ElapsedMilliseconds} ms");
+                Console.WriteLine(ExtractFirstTextContent(call.Result));
+                Console.WriteLine($"Latency: {call.LatencyMs} ms");
+            }
+            catch (McpRequestException ex)
+            {
+                Console.WriteLine($"Tool call failed: {ex.Message}");
+                Console.WriteLine($"Latency: {ex.LatencyMs} ms");
             }
             catch (Exception ex)
             {
@@ -203,14 +206,14 @@ public static class IcmMcpClientSample
                 continue;
             }
 
-            var stopwatch = Stopwatch.StartNew();
             bool success;
+            long latencyMs;
             string message = string.Empty;
             using var spinnerCts = new CancellationTokenSource();
             Task spinnerTask = ShowSpinnerAsync($"Running {tool.Name}", spinnerCts.Token);
             try
             {
-                await SendMcpRequestAsync(
+                McpCallResult call = await SendMcpRequestTimedAsync(
                     httpClient,
                     method: "tools/call",
                     @params: new
@@ -218,11 +221,33 @@ public static class IcmMcpClientSample
                         name = tool.Name,
                         arguments
                     });
-                success = true;
+                latencyMs = call.LatencyMs;
+
+                string resultText = ExtractFirstTextContent(call.Result);
+                if (IsErrorResultText(resultText))
+                {
+                    success = false;
+                    message = BuildShortErrorMessage(resultText);
+                }
+                else
+                {
+                    success = true;
+                    if (IsNoteResultText(resultText))
+                    {
+                        message = BuildShortErrorMessage(resultText);
+                    }
+                }
+            }
+            catch (McpRequestException ex)
+            {
+                success = false;
+                latencyMs = ex.LatencyMs;
+                message = BuildShortErrorMessage(ex.Message);
             }
             catch (Exception ex)
             {
                 success = false;
+                latencyMs = 0;
                 message = BuildShortErrorMessage(ex.Message);
             }
             finally
@@ -235,11 +260,9 @@ public static class IcmMcpClientSample
                 catch (OperationCanceledException)
                 {
                 }
-
-                stopwatch.Stop();
             }
 
-            results.Add(new BatchRunResult(tool.Name, stopwatch.ElapsedMilliseconds, success, message));
+            results.Add(new BatchRunResult(tool.Number, tool.Name, latencyMs, success, message));
         }
 
         if (results.Count == 0)
@@ -303,23 +326,24 @@ public static class IcmMcpClientSample
 
     private static void PrintBatchResultsTable(IList<BatchRunResult> results)
     {
+        const int orderWidth = 5;
         const int funcWidth = 40;
         const int latencyWidth = 12;
         const int statusWidth = 14;
         const int messageWidth = 50;
 
-        string horizontal = $"+{new string('-', funcWidth + 2)}+{new string('-', latencyWidth + 2)}+{new string('-', statusWidth + 2)}+{new string('-', messageWidth + 2)}+";
+        string horizontal = $"+{new string('-', orderWidth + 2)}+{new string('-', funcWidth + 2)}+{new string('-', latencyWidth + 2)}+{new string('-', statusWidth + 2)}+{new string('-', messageWidth + 2)}+";
         Console.WriteLine("Batch execution results:");
         Console.WriteLine(horizontal);
-        Console.WriteLine($"| {PadRight("func name", funcWidth)} | {PadRight("latency", latencyWidth)} | {PadRight("success/failed", statusWidth)} | {PadRight("message", messageWidth)} |");
+        Console.WriteLine($"| {PadRight("no.", orderWidth)} | {PadRight("func name", funcWidth)} | {PadRight("latency", latencyWidth)} | {PadRight("success/failed", statusWidth)} | {PadRight("message", messageWidth)} |");
         Console.WriteLine(horizontal);
 
         foreach (BatchRunResult result in results)
         {
             string latency = $"{result.LatencyMs} ms";
             string status = result.Success ? "success" : "failed";
-            string message = result.Success ? string.Empty : result.Message;
-            Console.WriteLine($"| {PadRight(result.FunctionName, funcWidth)} | {PadRight(latency, latencyWidth)} | {PadRight(status, statusWidth)} | {PadRight(message, messageWidth)} |");
+            string message = result.Message;
+            Console.WriteLine($"| {PadRight(result.ToolNumber.ToString(CultureInfo.InvariantCulture), orderWidth)} | {PadRight(result.FunctionName, funcWidth)} | {PadRight(latency, latencyWidth)} | {PadRight(status, statusWidth)} | {PadRight(message, messageWidth)} |");
         }
 
         Console.WriteLine(horizontal);
@@ -333,6 +357,28 @@ public static class IcmMcpClientSample
         }
 
         return message.Replace("\r", " ").Replace("\n", " ").Trim();
+    }
+
+    private static bool IsErrorResultText(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return false;
+        }
+
+        string normalized = text.TrimStart();
+        return normalized.StartsWith("Error", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsNoteResultText(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return false;
+        }
+
+        string normalized = text.TrimStart();
+        return normalized.StartsWith("No AI summary available", StringComparison.OrdinalIgnoreCase);
     }
 
     private static async Task ShowSpinnerAsync(string label, CancellationToken cancellationToken)
@@ -398,6 +444,22 @@ public static class IcmMcpClientSample
         }
 
         return resultElement.Clone();
+    }
+
+    private static async Task<McpCallResult> SendMcpRequestTimedAsync(HttpClient client, string method, object @params)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        try
+        {
+            JsonElement result = await SendMcpRequestAsync(client, method, @params);
+            stopwatch.Stop();
+            return new McpCallResult(result, stopwatch.ElapsedMilliseconds);
+        }
+        catch (Exception ex)
+        {
+            stopwatch.Stop();
+            throw new McpRequestException(ex.Message, stopwatch.ElapsedMilliseconds, ex);
+        }
     }
 
     private static string ExtractJsonFromSse(string ssePayload)
@@ -665,5 +727,18 @@ public static class IcmMcpClientSample
         string ExampleArguments,
         JsonElement InputSchema);
 
-    private sealed record BatchRunResult(string FunctionName, long LatencyMs, bool Success, string Message);
+    private sealed record BatchRunResult(int ToolNumber, string FunctionName, long LatencyMs, bool Success, string Message);
+
+    private sealed record McpCallResult(JsonElement Result, long LatencyMs);
+
+    private sealed class McpRequestException : Exception
+    {
+        public long LatencyMs { get; }
+
+        public McpRequestException(string message, long latencyMs, Exception innerException)
+            : base(message, innerException)
+        {
+            LatencyMs = latencyMs;
+        }
+    }
 }
