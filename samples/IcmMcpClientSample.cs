@@ -3,6 +3,7 @@ using Azure.Identity;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using System.Diagnostics;
 using System.Globalization;
 using System.Net.Http.Headers;
 using System.Text;
@@ -127,6 +128,7 @@ public static class IcmMcpClientSample
             try
             {
                 Console.WriteLine($"Calling tool: {selectedTool.Name}");
+                var stopwatch = Stopwatch.StartNew();
                 JsonElement callResult = await SendMcpRequestAsync(
                     httpClient,
                     method: "tools/call",
@@ -135,9 +137,11 @@ public static class IcmMcpClientSample
                         name = selectedTool.Name,
                         arguments
                     });
+                stopwatch.Stop();
 
                 Console.WriteLine("Result:");
                 Console.WriteLine(ExtractFirstTextContent(callResult));
+                Console.WriteLine($"Latency: {stopwatch.ElapsedMilliseconds} ms");
             }
             catch (Exception ex)
             {
