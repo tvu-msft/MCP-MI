@@ -14,6 +14,10 @@ namespace MCP_MI.FunctionAppSample;
 public class McpCallerFunction
 {
     private readonly ILogger<McpCallerFunction> _logger;
+    private static readonly HttpClient SharedHttpClient = new()
+    {
+        Timeout = TimeSpan.FromSeconds(100)
+    };
 
     public McpCallerFunction(ILogger<McpCallerFunction> logger)
     {
@@ -66,21 +70,6 @@ public class McpCallerFunction
                 new TokenRequestContext(new[] { scope }),
                 CancellationToken.None);
 
-            using var httpClient = new HttpClient
-            {
-                BaseAddress = new Uri(endpoint),
-                Timeout = TimeSpan.FromSeconds(100)
-            };
-
-            httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token.Token);
-            httpClient.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-            httpClient.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
-
-            if (!string.IsNullOrWhiteSpace(icmAppId))
-            {
-                httpClient.DefaultRequestHeaders.Add("x-icm-appid", icmAppId);
-            }
-
             var payload = new
             {
                 jsonrpc = "2.0",
@@ -96,11 +85,32 @@ public class McpCallerFunction
             string json = JsonSerializer.Serialize(payload);
             using var content = new StringContent(json, Encoding.UTF8, "application/json");
 
-            var sw = Stopwatch.StartNew();
-            using HttpResponseMessage upstream = await httpClient.PostAsync(string.Empty, content);
-            sw.Stop();
+            using var requestMessage = new HttpRequestMessage(HttpMethod.Post, endpoint)
+            {
+                Content = content
+            };
+            requestMessage.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token.Token);
+            requestMessage.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+            requestMessage.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
+
+            if (!string.IsNullOrWhiteSpace(icmAppId))
+            {
+                requestMessage.Headers.Add("x-icm-appid", icmAppId);
+            }
+
+            long startTicks = Stopwatch.GetTimestamp();
+            using HttpResponseMessage upstream = await SharedHttpClient.SendAsync(
+                requestMessage,
+                HttpCompletionOption.ResponseHeadersRead,
+                CancellationToken.None);
+            long headersReceivedTicks = Stopwatch.GetTimestamp();
 
             string upstreamBody = await upstream.Content.ReadAsStringAsync();
+            long endTicks = Stopwatch.GetTimestamp();
+
+            double requestToHeadersMs = (headersReceivedTicks - startTicks) * 1000.0 / Stopwatch.Frequency;
+            double headersToBodyMs = (endTicks - headersReceivedTicks) * 1000.0 / Stopwatch.Frequency;
+            double totalMcpCallMs = (endTicks - startTicks) * 1000.0 / Stopwatch.Frequency;
 
             HttpResponseData response = req.CreateResponse(upstream.IsSuccessStatusCode ? HttpStatusCode.OK : HttpStatusCode.BadGateway);
             response.Headers.Add("Content-Type", "application/json; charset=utf-8");
@@ -108,7 +118,12 @@ public class McpCallerFunction
             var output = new
             {
                 toolName,
-                latencyMs = sw.ElapsedMilliseconds,
+                latencyMs = Math.Round(totalMcpCallMs, 3),
+                latencyBreakdown = new
+                {
+                    requestToHeadersMs = Math.Round(requestToHeadersMs, 3),
+                    headersToBodyMs = Math.Round(headersToBodyMs, 3)
+                },
                 upstreamStatusCode = (int)upstream.StatusCode,
                 upstreamReason = upstream.ReasonPhrase,
                 mcpResponse = upstreamBody
