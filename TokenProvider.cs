@@ -11,7 +11,7 @@ public static class TokenProvider
         var credential = new DefaultAzureCredential(
             new DefaultAzureCredentialOptions
             {
-                ManagedIdentityClientId = "3bc62a4d-a65e-48ed-af39-f70577ab184c"
+                ManagedIdentityClientId = "3bc62a4d-a65e-48ed-af39-f70577ab184c" // PMEAPP ID
             });
 
         AccessToken accessToken = credential.GetToken(
