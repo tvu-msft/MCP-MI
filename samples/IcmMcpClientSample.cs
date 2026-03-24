@@ -32,8 +32,11 @@ public static class IcmMcpClientSample
             new DefaultAzureCredentialOptions { ManagedIdentityClientId = "3bc62a4d-a65e-48ed-af39-f70577ab184c" });
 
         AccessToken accessToken = credential.GetToken(new TokenRequestContext(new[] { "api://icmmcpapi-prod" }));
-        var token = accessToken.Token;
-        var icmAppId = Environment.GetEnvironmentVariable("ICM_APP_ID"); // Optional bulk-access app id
+        var token = accessToken.Token; // MI Token
+        
+        // Optional bulk-access app id 
+        // Foundry / large‑scale automation often needs it
+        var icmAppId = Environment.GetEnvironmentVariable("ICM_APP_ID"); 
 
         using var httpClient = new HttpClient
         {
@@ -43,6 +46,7 @@ public static class IcmMcpClientSample
         httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
         httpClient.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
         httpClient.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
+        
         if (!string.IsNullOrWhiteSpace(icmAppId))
         {
             httpClient.DefaultRequestHeaders.Add("x-icm-appid", icmAppId);
