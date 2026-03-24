@@ -12,7 +12,7 @@ namespace MCP_MI.Samples;
 
 public static class IcmMcpClientSample
 {
-    public static async Task RunAsync()
+    public static async Task RunInteractiveAsync()
     {
         var builder = Host.CreateApplicationBuilder();
 
@@ -70,7 +70,10 @@ public static class IcmMcpClientSample
                     string description = tool.TryGetProperty("description", out JsonElement descEl) ? descEl.GetString() ?? string.Empty : string.Empty;
                     string parameters = ExtractToolParameters(tool);
                     string exampleArguments = BuildExampleArguments(tool);
-                    toolList.Add(new ToolDoc(idx, name, description, parameters, exampleArguments));
+                    JsonElement inputSchema = tool.TryGetProperty("inputSchema", out JsonElement schemaEl)
+                        ? schemaEl.Clone()
+                        : default;
+                    toolList.Add(new ToolDoc(idx, name, description, parameters, exampleArguments, inputSchema));
                     idx++;
                 }
             }
@@ -82,39 +85,61 @@ public static class IcmMcpClientSample
                 Console.WriteLine($"Description: {tool.Description}");
             }
 
-            //WriteToolsMarkdown(tools, Path.Combine("docs", "icm-mcp-tools.md"));
+            WriteToolsMarkdown(tools, Path.Combine("docs", "icm-mcp-tools.md"));
         }
         catch (Exception ex)
         {
             logger.LogError(ex, "An error occurred while listing tools.");
+            return;
         }
 
-        Console.WriteLine("======================================================");
+        while (true)
+        {
+            Console.WriteLine("======================================================");
+            Console.Write("Select a tool by number (or q to quit): ");
+            string? selectedRaw = Console.ReadLine();
 
-        Console.WriteLine("Call tool to get incident details for incident 742411676");
-
-        JsonElement callResult = await SendMcpRequestAsync(
-            httpClient,
-            method: "tools/call",
-            @params: new
+            if (string.Equals(selectedRaw?.Trim(), "q", StringComparison.OrdinalIgnoreCase))
             {
-                name = "get_incident_details_by_id",
-                arguments = new Dictionary<string, object?>() { ["incidentId"] = 742411676 }
-            });
+                Console.WriteLine("Exiting tool runner.");
+                return;
+            }
 
-        Console.WriteLine(ExtractFirstTextContent(callResult));
-        Console.WriteLine("Call tool to get contact for alias yudihe");
-
-        callResult = await SendMcpRequestAsync(
-            httpClient,
-            method: "tools/call",
-            @params: new
+            if (!int.TryParse(selectedRaw, out int selectedIndex))
             {
-                name = "get_contact_by_alias",
-                arguments = new Dictionary<string, object?>() { ["alias"] = "yudihe" }
-            });
+                Console.WriteLine("Invalid selection. Please enter a number or q.");
+                continue;
+            }
 
-        Console.WriteLine(ExtractFirstTextContent(callResult));
+            ToolDoc? selectedTool = tools.FirstOrDefault(t => t.Number == selectedIndex);
+            if (selectedTool is null)
+            {
+                Console.WriteLine("Tool not found for the selected number.");
+                continue;
+            }
+
+            Dictionary<string, object?> arguments = PromptArgumentsForTool(selectedTool);
+
+            try
+            {
+                Console.WriteLine($"Calling tool: {selectedTool.Name}");
+                JsonElement callResult = await SendMcpRequestAsync(
+                    httpClient,
+                    method: "tools/call",
+                    @params: new
+                    {
+                        name = selectedTool.Name,
+                        arguments
+                    });
+
+                Console.WriteLine("Result:");
+                Console.WriteLine(ExtractFirstTextContent(callResult));
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Tool call failed: {ex.Message}");
+            }
+        }
     }
 
     private static async Task<JsonElement> SendMcpRequestAsync(HttpClient client, string method, object @params)
@@ -338,5 +363,84 @@ public static class IcmMcpClientSample
         return value.Replace("|", "\\|").Replace("\r", " ").Replace("\n", " ").Trim();
     }
 
-    private sealed record ToolDoc(int Number, string Name, string Description, string Parameters, string ExampleArguments);
+    private static Dictionary<string, object?> PromptArgumentsForTool(ToolDoc tool)
+    {
+        var arguments = new Dictionary<string, object?>();
+
+        if (tool.InputSchema.ValueKind != JsonValueKind.Object ||
+            !tool.InputSchema.TryGetProperty("properties", out JsonElement properties) ||
+            properties.ValueKind != JsonValueKind.Object)
+        {
+            return arguments;
+        }
+
+        var requiredSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (tool.InputSchema.TryGetProperty("required", out JsonElement required) && required.ValueKind == JsonValueKind.Array)
+        {
+            foreach (JsonElement req in required.EnumerateArray())
+            {
+                string? reqName = req.GetString();
+                if (!string.IsNullOrWhiteSpace(reqName))
+                {
+                    requiredSet.Add(reqName);
+                }
+            }
+        }
+
+        foreach (JsonProperty prop in properties.EnumerateObject())
+        {
+            string paramName = prop.Name;
+            bool isRequired = requiredSet.Contains(paramName);
+            string type = prop.Value.TryGetProperty("type", out JsonElement typeEl) ? typeEl.GetString() ?? "string" : "string";
+
+            if (!isRequired)
+            {
+                continue;
+            }
+
+            while (true)
+            {
+                Console.Write($"Enter {paramName} ({type}){(isRequired ? " [required]" : string.Empty)}: ");
+                string? input = Console.ReadLine();
+                if (string.IsNullOrWhiteSpace(input))
+                {
+                    Console.WriteLine("Value is required.");
+                    continue;
+                }
+
+                try
+                {
+                    arguments[paramName] = ParseInputValue(input, type);
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Invalid value: {ex.Message}");
+                }
+            }
+        }
+
+        return arguments;
+    }
+
+    private static object? ParseInputValue(string input, string type)
+    {
+        return type switch
+        {
+            "integer" => long.Parse(input, CultureInfo.InvariantCulture),
+            "number" => double.Parse(input, CultureInfo.InvariantCulture),
+            "boolean" => bool.Parse(input),
+            "array" => JsonDocument.Parse(input).RootElement.Clone(),
+            "object" => JsonDocument.Parse(input).RootElement.Clone(),
+            _ => input
+        };
+    }
+
+    private sealed record ToolDoc(
+        int Number,
+        string Name,
+        string Description,
+        string Parameters,
+        string ExampleArguments,
+        JsonElement InputSchema);
 }

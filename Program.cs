@@ -3,10 +3,8 @@ using MCP_MI;
 
 try
 {
-    // string token = TokenProvider.GetIcmMcpApiToken();
-    // Console.WriteLine("TOKEN_SUCCESS");
-    // Console.WriteLine(token);
-    await IcmMcpClientSample.RunAsync();
+    //await IcmMcpClientSample.RunAsync();
+    await IcmMcpClientSample.RunInteractiveAsync();
 }
 catch (Exception ex)
 {
