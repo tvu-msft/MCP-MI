@@ -31,13 +31,13 @@ public static class IcmMcpClientSample
         DefaultAzureCredential credential = new DefaultAzureCredential(
             new DefaultAzureCredentialOptions { ManagedIdentityClientId = "3bc62a4d-a65e-48ed-af39-f70577ab184c" });
 
-        AccessToken accessToken = credential.GetToken(new TokenRequestContext(new[] { "api://icmmcpapi-ppe" }));
+        AccessToken accessToken = credential.GetToken(new TokenRequestContext(new[] { "api://icmmcpapi-prod" }));
         var token = accessToken.Token;
         var icmAppId = Environment.GetEnvironmentVariable("ICM_APP_ID"); // Optional bulk-access app id
 
         using var httpClient = new HttpClient
         {
-            BaseAddress = new Uri("https://icm-mcp-ppe.azure-api.net/v1/")
+            BaseAddress = new Uri("https://icm-mcp-prod.azure-api.net/v1/")
         };
         httpClient.Timeout = new TimeSpan(0, 0, 100);
         httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
@@ -82,7 +82,7 @@ public static class IcmMcpClientSample
                 Console.WriteLine($"Description: {tool.Description}");
             }
 
-            WriteToolsMarkdown(tools, Path.Combine("docs", "icm-mcp-tools.md"));
+            //WriteToolsMarkdown(tools, Path.Combine("docs", "icm-mcp-tools.md"));
         }
         catch (Exception ex)
         {
@@ -91,7 +91,7 @@ public static class IcmMcpClientSample
 
         Console.WriteLine("======================================================");
 
-        Console.WriteLine("Call tool to get incident details for incident 139979555");
+        Console.WriteLine("Call tool to get incident details for incident 742411676");
 
         JsonElement callResult = await SendMcpRequestAsync(
             httpClient,
@@ -99,7 +99,7 @@ public static class IcmMcpClientSample
             @params: new
             {
                 name = "get_incident_details_by_id",
-                arguments = new Dictionary<string, object?>() { ["incidentId"] = 139979555 }
+                arguments = new Dictionary<string, object?>() { ["incidentId"] = 742411676 }
             });
 
         Console.WriteLine(ExtractFirstTextContent(callResult));
