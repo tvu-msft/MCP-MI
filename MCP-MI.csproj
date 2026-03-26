@@ -13,5 +13,6 @@
 
   <ItemGroup>
     <Compile Remove="functionapp\**\*.cs" />
+    <Compile Remove="dist\**\*.cs" />
   </ItemGroup>
 </Project>

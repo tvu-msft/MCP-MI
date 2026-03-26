@@ -14,6 +14,9 @@ namespace MCP_MI.Samples;
 public static class IcmMcpClientSample
 {
     private const string IncidentIdParameterName = "incidentId";
+    private const string DefaultMcpEndpoint = "https://icm-mcp-prod.azure-api.net/v1/";
+    private const string DefaultMcpScope = "api://icmmcpapi-prod/.default";
+    private const string DefaultManagedIdentityClientId = "3bc62a4d-a65e-48ed-af39-f70577ab184c";
 
     public static async Task RunInteractiveAsync()
     {
@@ -30,15 +33,17 @@ public static class IcmMcpClientSample
         // Connect to an MCP server
         Console.WriteLine("Connecting client to MCP server");
 
-        // Add server token authentication to the client.
-        // DefaultAzureCredential credential = new DefaultAzureCredential(
-        //     new DefaultAzureCredentialOptions { ManagedIdentityClientId = "3bc62a4d-a65e-48ed-af39-f70577ab184c" });
+        string managedIdentityClientId = Environment.GetEnvironmentVariable("MANAGED_IDENTITY_CLIENT_ID")
+            ?? DefaultManagedIdentityClientId;
+        string scope = Environment.GetEnvironmentVariable("MCP_SCOPE")
+            ?? DefaultMcpScope;
+        string endpoint = Environment.GetEnvironmentVariable("MCP_ENDPOINT")
+            ?? DefaultMcpEndpoint;
 
-        var credential = new ManagedIdentityCredential(
-            ManagedIdentityId.FromUserAssignedClientId("3bc62a4d-a65e-48ed-af39-f70577ab184c"));
-
-
-        AccessToken accessToken = credential.GetToken(new TokenRequestContext(new[] { "api://icmmcpapi-prod/.default" }));
+        TokenCredential credential = CreateCredential(managedIdentityClientId);
+        AccessToken accessToken = await credential.GetTokenAsync(
+            new TokenRequestContext(new[] { scope }),
+            CancellationToken.None);
         var token = accessToken.Token; // MI Token
         
         // Optional bulk-access app id 
@@ -47,7 +52,7 @@ public static class IcmMcpClientSample
 
         using var httpClient = new HttpClient
         {
-            BaseAddress = new Uri("https://icm-mcp-prod.azure-api.net/v1/")
+            BaseAddress = new Uri(endpoint)
         };
         httpClient.Timeout = new TimeSpan(0, 0, 100);
         httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
@@ -721,6 +726,25 @@ public static class IcmMcpClientSample
             "object" => JsonDocument.Parse(input).RootElement.Clone(),
             _ => input
         };
+    }
+
+    private static TokenCredential CreateCredential(string managedIdentityClientId)
+    {
+        if (HasManagedIdentityEnvironment())
+        {
+            return new ManagedIdentityCredential(
+                ManagedIdentityId.FromUserAssignedClientId(managedIdentityClientId));
+        }
+
+        // Local development fallback; requires `az login`.
+        return new AzureCliCredential();
+    }
+
+    private static bool HasManagedIdentityEnvironment()
+    {
+        return !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("IDENTITY_ENDPOINT"))
+            || !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("MSI_ENDPOINT"))
+            || !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("WEBSITE_INSTANCE_ID"));
     }
 
     private sealed record ToolDoc(

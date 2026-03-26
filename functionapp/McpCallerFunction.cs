@@ -38,6 +38,8 @@ public class McpCallerFunction
                 ? toolEl.GetString() ?? string.Empty
                 : string.Empty;
 
+            toolName = NormalizeToolName(toolName);
+
             if (string.IsNullOrWhiteSpace(toolName))
             {
                 HttpResponseData bad = req.CreateResponse(HttpStatusCode.BadRequest);
@@ -58,12 +60,7 @@ public class McpCallerFunction
             string? managedIdentityClientId = Environment.GetEnvironmentVariable("MANAGED_IDENTITY_CLIENT_ID");
             string? icmAppId = Environment.GetEnvironmentVariable("ICM_APP_ID");
 
-            TokenCredential credential = string.IsNullOrWhiteSpace(managedIdentityClientId)
-                ? new DefaultAzureCredential()
-                : new DefaultAzureCredential(new DefaultAzureCredentialOptions
-                {
-                    ManagedIdentityClientId = managedIdentityClientId
-                });
+            TokenCredential credential = CreateManagedIdentityCredential(managedIdentityClientId);
 
             // Acquire AAD token for MCP API.
             AccessToken token = await credential.GetTokenAsync(
@@ -139,5 +136,27 @@ public class McpCallerFunction
             await error.WriteStringAsync($"Error: {ex.Message}");
             return error;
         }
+    }
+
+    private static TokenCredential CreateManagedIdentityCredential(string? managedIdentityClientId)
+    {
+        if (string.IsNullOrWhiteSpace(managedIdentityClientId))
+        {
+            return new ManagedIdentityCredential();
+        }
+
+        return new ManagedIdentityCredential(
+            ManagedIdentityId.FromUserAssignedClientId(managedIdentityClientId));
+    }
+
+    private static string NormalizeToolName(string toolName)
+    {
+        const string Prefix = "mcp_icm-mcp_";
+        if (toolName.StartsWith(Prefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return toolName.Substring(Prefix.Length);
+        }
+
+        return toolName;
     }
 }

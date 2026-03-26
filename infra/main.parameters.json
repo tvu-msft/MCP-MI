@@ -1,0 +1,24 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "location": {
+      "value": "canadacentral"
+    },
+    "mcpEndpoint": {
+      "value": "https://icm-mcp-prod.azure-api.net/v1/"
+    },
+    "mcpScope": {
+      "value": "api://icmmcpapi-prod/.default"
+    },
+    "managedIdentityClientId": {
+      "value": "3bc62a4d-a65e-48ed-af39-f70577ab184c"
+    },
+    "managedIdentityResourceId": {
+      "value": ""
+    },
+    "icmAppId": {
+      "value": ""
+    }
+  }
+}

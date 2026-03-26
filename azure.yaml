@@ -1,0 +1,11 @@
+name: mcp-mi
+metadata:
+  template: mcp-mi@0.0.1-beta
+infra:
+  provider: bicep
+  path: infra
+services:
+  functionapp:
+    project: functionapp
+    language: dotnet
+    host: function
