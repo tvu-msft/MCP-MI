@@ -1,18 +1,9 @@
-# Azure Corp deployment guide for CallMcp Function
+# Azure PME deployment guide for CallMcp Function (SAW without .NET SDK)
 
-This guide deploys the Function App and configures Managed Identity to call IcM MCP.
+This guide is for environments where .NET SDK is unavailable in SAW.
 
-## Prerequisites
-
-- Azure CLI logged in to your corporate tenant
-- Access to the target subscription/resource group
-- A user-assigned managed identity (recommended) with permission to request tokens for `api://icmmcpapi-prod/.default`
-
-## 1. Set deployment variables
-$miClientId = "3bc62a4d-a65e-48ed-af39-f70577ab184c"
-# Azure PME deployment guide for CallMcp Function (azd)
-
-This guide deploys the Function App with azd and configures Managed Identity to call IcM MCP.
+- Use `azd` for infrastructure only (`azd provision`).
+- Use ZIP deploy (`az functionapp deployment source config-zip`) for function code.
 
 ## Prerequisites
 
@@ -20,7 +11,7 @@ This guide deploys the Function App with azd and configures Managed Identity to 
 - Azure CLI (`az`) installed
 - Permission to deploy to subscription `8b055e41-644a-4d6b-8022-812b0142e2fe`
 - Existing resource group: `OSOC-ICM-MCP-RG`
-- User-assigned managed identity resource ID in PME (if using UAMI)
+- Built function ZIP package (`functionapp.zip`) created on a machine with .NET SDK
 
 ## 1. Sign in and set subscription
 
@@ -33,73 +24,57 @@ az account show --query "{name:name,id:id,tenantId:tenantId}" -o table
 
 ## 2. Configure azd environment
 
-From repository root (`C:\Code\MCP-MI`):
+From repository root:
 
 ```powershell
 azd env new pme
 azd env set AZURE_SUBSCRIPTION_ID 8b055e41-644a-4d6b-8022-812b0142e2fe
 azd env set AZURE_RESOURCE_GROUP OSOC-ICM-MCP-RG
 azd env set AZURE_LOCATION canadacentral
-```
-
-Set required parameter values for infrastructure:
-
-```powershell
+azd env set FUNCTIONAPPNAME osoc-mcp-functionapp
 azd env set MANAGEDIDENTITYRESOURCEID "<uami-resource-id-in-pme-or-empty>"
 azd env set MANAGEDIDENTITYCLIENTID "3bc62a4d-a65e-48ed-af39-f70577ab184c"
 azd env set ICMAPPID "<optional-icm-app-id-or-empty>"
 ```
 
-## 3. Provision Azure infrastructure
+## 3. Provision infrastructure (Bicep only)
 
 ```powershell
 azd provision
 ```
 
-What this creates (via `infra/main.bicep`):
+## 4. Deploy function code using ZIP package
 
-- Storage account
-- App Service consumption plan
-- Log Analytics workspace
-- Application Insights
-- Function App with managed identity + app settings for MCP
-
-## 4. Deploy function code
+Copy your prebuilt `functionapp.zip` into SAW, then run:
 
 ```powershell
-azd deploy
+az functionapp deployment source config-zip `
+  --name osoc-mcp-functionapp `
+  --resource-group OSOC-ICM-MCP-RG `
+  --src .\functionapp.zip
 ```
 
-## 5. Validate deployment
-
-Get function host name and function key:
+## 5. Validate deployed function
 
 ```powershell
-$functionAppName = azd env get-value SERVICE_FUNCTIONAPP_NAME
+$functionAppName = 'osoc-mcp-functionapp'
 $key = az functionapp function keys list `
   --resource-group OSOC-ICM-MCP-RG `
   --name $functionAppName `
   --function-name CallMcp `
   --query default -o tsv
-```
 
-Call endpoint:
-
-```powershell
-$body = @{ toolName = "get_ai_summary"; arguments = @{ incidentId = "626495494" } } | ConvertTo-Json -Depth 5
+$body = @{ toolName = 'get_ai_summary'; arguments = @{ incidentId = '626495494' } } | ConvertTo-Json -Depth 5
 Invoke-RestMethod `
   -Uri "https://$functionAppName.azurewebsites.net/api/CallMcp?code=$key" `
   -Method Post `
-  -ContentType "application/json" `
+  -ContentType 'application/json' `
   -Body $body
 ```
 
 ## Notes
 
-- Infrastructure uses files at repo root: `azure.yaml`, `infra/main.bicep`, `infra/main.parameters.json`.
-- If `MANAGEDIDENTITYRESOURCEID` is empty, the Function App uses system-assigned identity.
-- For your PME user-assigned identity, set both:
-  - `MANAGEDIDENTITYRESOURCEID`
-  - `MANAGEDIDENTITYCLIENTID`
-- The function normalizes tool names with prefix `mcp_icm-mcp_` automatically.
-  --function-name CallMcp `
+- Do not run `azd deploy` in SAW when .NET SDK is missing.
+- Infrastructure files are at `azure.yaml`, `infra/main.bicep`, `infra/main.parameters.json`.
+- If `MANAGEDIDENTITYRESOURCEID` is empty, Function App uses system-assigned identity.
+- For user-assigned identity, set both `MANAGEDIDENTITYRESOURCEID` and `MANAGEDIDENTITYCLIENTID`.
