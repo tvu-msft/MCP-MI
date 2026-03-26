@@ -31,10 +31,14 @@ public static class IcmMcpClientSample
         Console.WriteLine("Connecting client to MCP server");
 
         // Add server token authentication to the client.
-        DefaultAzureCredential credential = new DefaultAzureCredential(
-            new DefaultAzureCredentialOptions { ManagedIdentityClientId = "3bc62a4d-a65e-48ed-af39-f70577ab184c" });
+        // DefaultAzureCredential credential = new DefaultAzureCredential(
+        //     new DefaultAzureCredentialOptions { ManagedIdentityClientId = "3bc62a4d-a65e-48ed-af39-f70577ab184c" });
 
-        AccessToken accessToken = credential.GetToken(new TokenRequestContext(new[] { "api://icmmcpapi-prod" }));
+        var credential = new ManagedIdentityCredential(
+            ManagedIdentityId.FromUserAssignedClientId("3bc62a4d-a65e-48ed-af39-f70577ab184c"));
+
+
+        AccessToken accessToken = credential.GetToken(new TokenRequestContext(new[] { "api://icmmcpapi-prod/.default" }));
         var token = accessToken.Token; // MI Token
         
         // Optional bulk-access app id 
