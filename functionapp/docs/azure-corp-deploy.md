@@ -1,25 +1,22 @@
-# Azure PME deployment guide for CallMcp Function (SAW without .NET SDK)
+# Azure PME deployment guide for CallMcp Function (azd-only in SAW)
 
-This guide is for environments where .NET SDK is unavailable in SAW.
+This guide is for environments where .NET SDK is unavailable in SAW and only `azd` is allowed.
 
-- Use `azd` for infrastructure only (`azd provision`).
-- Use ZIP deploy (`az functionapp deployment source config-zip`) for function code.
+- Use `azd provision` for infrastructure.
+- Use `azd deploy --from-package` for function code package upload.
 
 ## Prerequisites
 
 - Azure Developer CLI (`azd`) installed
-- Azure CLI (`az`) installed
+- No direct Azure CLI (`az`) commands required in SAW
 - Permission to deploy to subscription `8b055e41-644a-4d6b-8022-812b0142e2fe`
 - Existing resource group: `OSOC-ICM-MCP-RG`
 - Built function ZIP package (`functionapp.zip`) created on a machine with .NET SDK
 
-## 1. Sign in and set subscription
+## 1. Sign in with azd
 
 ```powershell
 azd auth login
-az login
-az account set --subscription 8b055e41-644a-4d6b-8022-812b0142e2fe
-az account show --query "{name:name,id:id,tenantId:tenantId}" -o table
 ```
 
 ## 2. Configure azd environment
@@ -43,38 +40,28 @@ azd env set ICMAPPID "<optional-icm-app-id-or-empty>"
 azd provision
 ```
 
-## 4. Deploy function code using ZIP package
+## 4. Deploy function code using azd package deploy
 
 Copy your prebuilt `functionapp.zip` into SAW, then run:
 
 ```powershell
-az functionapp deployment source config-zip `
-  --name osoc-mcp-functionapp `
-  --resource-group OSOC-ICM-MCP-RG `
-  --src .\functionapp.zip
+azd deploy functionapp --from-package .\functionapp.zip
 ```
 
 ## 5. Validate deployed function
 
 ```powershell
-$functionAppName = 'osoc-mcp-functionapp'
-$key = az functionapp function keys list `
-  --resource-group OSOC-ICM-MCP-RG `
-  --name $functionAppName `
-  --function-name CallMcp `
-  --query default -o tsv
+# Get function app endpoint from azd outputs
+$functionAppUri = azd env get-value SERVICE_FUNCTIONAPP_URI
+Write-Host "Function host: $functionAppUri"
 
-$body = @{ toolName = 'get_ai_summary'; arguments = @{ incidentId = '626495494' } } | ConvertTo-Json -Depth 5
-Invoke-RestMethod `
-  -Uri "https://$functionAppName.azurewebsites.net/api/CallMcp?code=$key" `
-  -Method Post `
-  -ContentType 'application/json' `
-  -Body $body
+# If your function auth level is Function, call validation from a machine that can retrieve keys
+# or temporarily switch auth level for non-production test.
 ```
 
 ## Notes
 
-- Do not run `azd deploy` in SAW when .NET SDK is missing.
+- Use `azd deploy functionapp --from-package` when .NET SDK is missing.
 - Infrastructure files are at `azure.yaml`, `infra/main.bicep`, `infra/main.parameters.json`.
 - If `MANAGEDIDENTITYRESOURCEID` is empty, Function App uses system-assigned identity.
 - For user-assigned identity, set both `MANAGEDIDENTITYRESOURCEID` and `MANAGEDIDENTITYCLIENTID`.
