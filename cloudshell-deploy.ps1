@@ -11,10 +11,10 @@ Write-Host "[1/8] Setting Azure subscription..." -ForegroundColor Cyan
 az account set --subscription $SubscriptionId
 
 Write-Host "[2/8] Verifying resource group..." -ForegroundColor Cyan
-az group show --name $ResourceGroup --output table
+az group show --name $ResourceGroup --query "{name:name, location:location, provisioningState:properties.provisioningState}" --output table
 
 Write-Host "[3/8] Verifying function app..." -ForegroundColor Cyan
-az functionapp show --name $FunctionAppName --resource-group $ResourceGroup --output table
+az functionapp show --name $FunctionAppName --resource-group $ResourceGroup --query "{name:name, state:state, defaultHostName:defaultHostName, location:location}" --output table
 
 Write-Host "[4/8] Deploying zip package..." -ForegroundColor Cyan
 az functionapp deployment source config-zip `
