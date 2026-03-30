@@ -10,8 +10,8 @@ $FunctionAppName = "osoc-mcp-functionapp"
 $EnvName = "pme"
 
 # Leave empty if system-assigned MI only
-$ManagedIdentityResourceId = "<uami-resource-id-in-pme-or-empty>"
-$ManagedIdentityClientId = "3bc62a4d-a65e-48ed-af39-f70577ab184c"
+$ManagedIdentityResourceId = "osoc-mcp-functionapp-uami"
+$ManagedIdentityClientId = "27183a69-6e6f-4226-ab16-099abb5c8e8d"
 $IcmAppId = ""
 
 # Input package files in current folder

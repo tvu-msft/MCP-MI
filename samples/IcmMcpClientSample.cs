@@ -16,7 +16,7 @@ public static class IcmMcpClientSample
     private const string IncidentIdParameterName = "incidentId";
     private const string DefaultMcpEndpoint = "https://icm-mcp-prod.azure-api.net/v1/";
     private const string DefaultMcpScope = "api://icmmcpapi-prod/.default";
-    private const string DefaultManagedIdentityClientId = "3bc62a4d-a65e-48ed-af39-f70577ab184c";
+    private const string DefaultManagedIdentityClientId = "27183a69-6e6f-4226-ab16-099abb5c8e8d"; //"3bc62a4d-a65e-48ed-af39-f70577ab184c";
 
     public static async Task RunInteractiveAsync()
     {
