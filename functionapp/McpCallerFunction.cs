@@ -60,7 +60,7 @@ public class McpCallerFunction
             string? managedIdentityClientId = Environment.GetEnvironmentVariable("MANAGED_IDENTITY_CLIENT_ID");
             string? icmAppId = Environment.GetEnvironmentVariable("ICM_APP_ID");
 
-            TokenCredential credential = CreateManagedIdentityCredential(managedIdentityClientId);
+            TokenCredential credential = CreateTokenCredential(managedIdentityClientId);
 
             // Acquire AAD token for MCP API.
             AccessToken token = await credential.GetTokenAsync(
@@ -138,15 +138,20 @@ public class McpCallerFunction
         }
     }
 
-    private static TokenCredential CreateManagedIdentityCredential(string? managedIdentityClientId)
+    private static TokenCredential CreateTokenCredential(string? managedIdentityClientId)
     {
-        if (string.IsNullOrWhiteSpace(managedIdentityClientId))
+        var options = new DefaultAzureCredentialOptions
         {
-            return new ManagedIdentityCredential();
+            ExcludeInteractiveBrowserCredential = true
+        };
+
+        if (!string.IsNullOrWhiteSpace(managedIdentityClientId))
+        {
+            options.ManagedIdentityClientId = managedIdentityClientId;
         }
 
-        return new ManagedIdentityCredential(
-            ManagedIdentityId.FromUserAssignedClientId(managedIdentityClientId));
+        // In Azure this uses managed identity, while local dev can fall back to Azure CLI/VS credentials.
+        return new DefaultAzureCredential(options);
     }
 
     private static string NormalizeToolName(string toolName)
